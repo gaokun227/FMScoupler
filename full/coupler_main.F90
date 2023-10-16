@@ -1739,7 +1739,7 @@ contains
       endif
       call fms_mpp_clock_begin(id_land_model_init)
       call land_model_init( Atmos_land_boundary, Land, Time_init, Time, &
-                            Time_step_atmos, Time_step_cpld )
+                            Time_step_atmos, Time_step_cpld,domain_in=Atm%domain )
       call fms_mpp_clock_end(id_land_model_init)
       if (fms_mpp_pe().EQ.fms_mpp_root_pe()) then
         call DATE_AND_TIME(walldate, walltime, wallzone, wallvalues)

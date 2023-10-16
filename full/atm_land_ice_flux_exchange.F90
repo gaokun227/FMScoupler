@@ -1705,8 +1705,8 @@ contains
                ex_t_ref(i) = ex_t_ca(i) + (ex_t_atm(i)-ex_t_ca(i)) * ex_del_h(i)
        enddo
        call fms_sat_vapor_pres_compute_qs (ex_t_ref(is:ie), ex_p_surf(is:ie), ex_qs_ref(is:ie), q = ex_ref(is:ie))
-       call fms_sat_vapor_pres_compute_qs (ex_t_ref(is:ie), ex_p_surf(is:ie), ex_qs_ref_cmip(is:ie),  &
-            q = ex_ref(is:ie), es_over_liq_and_ice = .true.)
+    !   call fms_sat_vapor_pres_compute_qs (ex_t_ref(is:ie), ex_p_surf(is:ie), ex_qs_ref_cmip(is:ie),  &
+    !        q = ex_ref(is:ie), es_over_liq_and_ice = .true.)
        do i = is,ie
           if(ex_avail(i)) then
              ! remove cap on relative humidity -- this mod requested by cjg, ljd
