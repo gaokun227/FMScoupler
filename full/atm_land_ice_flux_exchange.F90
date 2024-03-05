@@ -107,7 +107,7 @@ use FMSconstants, only: rdgas, rvgas, cp_air, stefan, WTMAIR, HLV, HLF, Radius, 
              id_rough_moist, id_rough_heat, id_rough_mom,    &
              id_land_mask,   id_ice_mask,     &
              id_u_star, id_b_star, id_q_star, id_u_flux, id_v_flux,   &
-             id_t_surf, id_t_flux, id_r_flux, id_q_flux, id_slp,      &
+             id_t_surf, id_t_ocean, id_t_flux, id_r_flux, id_q_flux, id_slp,      &
              id_t_atm,  id_u_atm,  id_v_atm,  id_wind,                &
              id_t_ref,  id_rh_ref, id_u_ref,  id_v_ref, id_wind_ref,  &
              id_del_h,  id_del_m,  id_del_q,  id_rough_scale,         &
@@ -548,6 +548,7 @@ contains
     !allocate land_ice_atmos_boundary
     call fms_mpp_domains_get_compute_domain( Atm%domain, is, ie, js, je )
     allocate( land_ice_atmos_boundary%t(is:ie,js:je) )
+    allocate( land_ice_atmos_boundary%t_ocean(is:ie,js:je) )
     allocate( land_ice_atmos_boundary%u_ref(is:ie,js:je) )  ! bqx
     allocate( land_ice_atmos_boundary%v_ref(is:ie,js:je) )  ! bqx
     allocate( land_ice_atmos_boundary%t_ref(is:ie,js:je) )  ! cjg: PBL depth mods
@@ -575,6 +576,7 @@ contains
     allocate( land_ice_atmos_boundary%frac_open_sea(is:ie,js:je) )
     ! initialize boundary values for override experiments (mjh)
     land_ice_atmos_boundary%t=273.0
+    land_ice_atmos_boundary%t_ocean=200.0
     land_ice_atmos_boundary%u_ref=0.0   ! bqx
     land_ice_atmos_boundary%v_ref=0.0   ! bqx
     land_ice_atmos_boundary%t_ref=273.0   ! cjg: PBL depth mods
@@ -1370,6 +1372,9 @@ contains
     enddo
 
     ! [6.2] put relevant quantities onto atmospheric boundary
+!!! ex_t_surf is originally projected from ice%t_surf onto the exchange grid.
+!!! Here we project back to atmos%land_ice...
+    call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%t_ocean,         'ATM', ex_t_surf  ,  xmap_sfc, complete=.false.)
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%t,         'ATM', ex_t_surf4  ,  xmap_sfc, complete=.false.)
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%frac_open_sea,'ATM',ex_frac_open_sea, xmap_sfc)
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%albedo,    'ATM', ex_albedo   ,  xmap_sfc, complete=.false.)
@@ -1711,7 +1716,7 @@ contains
           if(ex_avail(i)) then
              ! remove cap on relative humidity -- this mod requested by cjg, ljd
              !RSH    ex_ref    = MIN(100.,100.*ex_ref/ex_qs_ref)
-             ex_ref2(i)   = 100.*ex_ref(i)/ex_qs_ref_cmip(i)
+             !ex_ref2(i)   = 100.*ex_ref(i)/ex_qs_ref_cmip(i)
              ex_ref(i)    = 100.*ex_ref(i)/ex_qs_ref(i)
           endif
        enddo
@@ -2885,7 +2890,25 @@ contains
 
     !=======================================================================
     !-------------------- diagnostics section ------------------------------
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!recheck the logic between t_ocean and t_surf
 
+!!! ex_t_surf is originally projected from ice%t_surf onto the exchange grid.
+!!! then projected back to atmos%land_ice... to get t_ocean
+
+!!! t_surf is taken directly from the exchange grid ex_t_surf_new
+!!! where the latter is also projected from ice%t_surf
+
+!!! 2 ways to get the same results; however the checksums are not exactly the same.
+!!! For one day run, we have:
+!!! CHECKSUM::lnd_ice_atm_bnd_type%t           =     E6D6E211DCD1EFE7
+!!! CHECKSUM::lnd_ice_atm_bnd_type%t_ocean     =     E6D6E211DCD1F150
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    if ( id_t_ocean > 0 ) then
+       used = fms_diag_send_data ( id_t_ocean, Land_Ice_Atmos_Boundary%t_ocean, Time )
+    endif
     !------- new surface temperature -----------
 #ifdef use_AM3_physics
     if ( id_t_surf > 0 ) then
@@ -3440,6 +3463,12 @@ contains
     id_v_flux     = &
          fms_diag_register_diag_field ( mod_name, 'tau_y',      atmos_axes, Time, &
          'meridional wind stress',     'pa'   )
+
+    id_t_ocean     = &
+         fms_diag_register_diag_field ( mod_name, 't_ocean',     atmos_axes, Time, &
+         'surface temperature from ocean output',    'deg_k', &
+         range=trange    )
+
 
     id_t_surf     = &
          fms_diag_register_diag_field ( mod_name, 't_surf',     atmos_axes, Time, &
