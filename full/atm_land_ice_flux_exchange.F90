@@ -1400,6 +1400,9 @@ contains
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%u_ref,     'ATM', ex_ref_u     , xmap_sfc, complete=.false.) !bqx
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%v_ref,     'ATM', ex_ref_v     , xmap_sfc, complete=.true.) !bqx
 
+    call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%shflx,     'ATM', ex_flux_t     , xmap_sfc, complete=.false.) !kgao
+    call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%lhflx,     'ATM', ex_flux_tr(:,isphum), xmap_sfc, complete=.false.) !kgao
+
 #ifdef use_AM3_physics
     if (do_forecast) then
        call fms_xgrid_get_from_xgrid (Ice%t_surf, 'OCN', ex_t_surf,  xmap_sfc)
