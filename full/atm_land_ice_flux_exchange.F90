@@ -548,7 +548,7 @@ contains
     !allocate land_ice_atmos_boundary
     call fms_mpp_domains_get_compute_domain( Atm%domain, is, ie, js, je )
     allocate( land_ice_atmos_boundary%t(is:ie,js:je) )
-    allocate( land_ice_atmos_boundary%t_ocean(is:ie,js:je) )
+    allocate( land_ice_atmos_boundary%t_ocean(is:ie,js:je) )! joseph: for shield coupling
     allocate( land_ice_atmos_boundary%u_ref(is:ie,js:je) )  ! bqx
     allocate( land_ice_atmos_boundary%v_ref(is:ie,js:je) )  ! bqx
     allocate( land_ice_atmos_boundary%t_ref(is:ie,js:je) )  ! cjg: PBL depth mods
@@ -573,6 +573,7 @@ contains
     allocate( land_ice_atmos_boundary%lhflx(is:ie,js:je) )!miz
 #endif
     allocate( land_ice_atmos_boundary%rough_mom(is:ie,js:je) )
+    allocate( land_ice_atmos_boundary%rough_heat(is:ie,js:je) ) ! kgao: for shield coupling
     allocate( land_ice_atmos_boundary%frac_open_sea(is:ie,js:je) )
     ! initialize boundary values for override experiments (mjh)
     land_ice_atmos_boundary%t=273.0
@@ -601,6 +602,7 @@ contains
     land_ice_atmos_boundary%lhflx=0.0
 #endif
     land_ice_atmos_boundary%rough_mom=0.01
+    land_ice_atmos_boundary%rough_heat=0.01
     land_ice_atmos_boundary%frac_open_sea=0.0
 
     ! allocate fields for extra tracers
@@ -1374,7 +1376,10 @@ contains
     ! [6.2] put relevant quantities onto atmospheric boundary
 !!! ex_t_surf is originally projected from ice%t_surf onto the exchange grid.
 !!! Here we project back to atmos%land_ice...
-    call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%t_ocean,         'ATM', ex_t_surf  ,  xmap_sfc, complete=.false.)
+
+    ! kgao note: the 't_ocean' name should be changed; but 't_surf' is taken in flux_up_to_atmos()
+    ! maybe call it t_sfc 
+    call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%t_ocean,   'ATM', ex_t_surf  ,  xmap_sfc, complete=.false.)
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%t,         'ATM', ex_t_surf4  ,  xmap_sfc, complete=.false.)
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%frac_open_sea,'ATM',ex_frac_open_sea, xmap_sfc)
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%albedo,    'ATM', ex_albedo   ,  xmap_sfc, complete=.false.)
@@ -1387,8 +1392,8 @@ contains
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%albedo_nir_dif,    'ATM',   &
          ex_albedo_nir_dif   ,  xmap_sfc, complete=.false.)
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%rough_mom, 'ATM', ex_rough_mom,  xmap_sfc, complete=.false.)
+    call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%rough_heat,'ATM', ex_rough_heat, xmap_sfc, complete=.false.) !kgao
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%land_frac, 'ATM', ex_land_frac,  xmap_sfc, complete=.false.)
-
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%u_flux,    'ATM', ex_flux_u,     xmap_sfc, complete=.false.)
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%v_flux,    'ATM', ex_flux_v,     xmap_sfc, complete=.false.)
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%dtaudu,    'ATM', ex_dtaudu_atm, xmap_sfc, complete=.false.)
@@ -1400,6 +1405,7 @@ contains
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%u_ref,     'ATM', ex_ref_u     , xmap_sfc, complete=.false.) !bqx
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%v_ref,     'ATM', ex_ref_v     , xmap_sfc, complete=.true.) !bqx
 
+    ! kgao: needs to check if am5 needs to do the same as below 
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%shflx,     'ATM', ex_flux_t     , xmap_sfc, complete=.false.) !kgao
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%lhflx,     'ATM', ex_flux_tr(:,isphum), xmap_sfc, complete=.false.) !kgao
 
@@ -1641,6 +1647,11 @@ contains
        call fms_xgrid_get_from_xgrid (diag_atm, 'ATM', ex_slp, xmap_sfc)
        if ( id_slp > 0 ) used = fms_diag_send_data ( id_slp, diag_atm, Time )
        if ( id_psl > 0 ) used = fms_diag_send_data ( id_psl, diag_atm, Time )
+    endif
+
+    ! kgao - t_ocean
+    if ( id_t_ocean > 0 ) then
+       used = fms_diag_send_data ( id_t_ocean, Land_Ice_Atmos_Boundary%t_ocean, Time )
     endif
 
     !-----------------------------------------------------------------------
@@ -2909,9 +2920,11 @@ contains
 !!! CHECKSUM::lnd_ice_atm_bnd_type%t_ocean     =     E6D6E211DCD1F150
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    if ( id_t_ocean > 0 ) then
-       used = fms_diag_send_data ( id_t_ocean, Land_Ice_Atmos_Boundary%t_ocean, Time )
-    endif
+
+    ! kgao - do not write out t_ocean here.
+    !if ( id_t_ocean > 0 ) then
+    !   used = fms_diag_send_data ( id_t_ocean, Land_Ice_Atmos_Boundary%t_ocean, Time )
+    !endif
     !------- new surface temperature -----------
 #ifdef use_AM3_physics
     if ( id_t_surf > 0 ) then
@@ -3471,7 +3484,6 @@ contains
          fms_diag_register_diag_field ( mod_name, 't_ocean',     atmos_axes, Time, &
          'surface temperature from ocean output',    'deg_k', &
          range=trange    )
-
 
     id_t_surf     = &
          fms_diag_register_diag_field ( mod_name, 't_surf',     atmos_axes, Time, &
