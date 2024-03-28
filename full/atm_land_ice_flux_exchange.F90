@@ -1405,7 +1405,7 @@ contains
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%u_ref,     'ATM', ex_ref_u     , xmap_sfc, complete=.false.) !bqx
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%v_ref,     'ATM', ex_ref_v     , xmap_sfc, complete=.true.) !bqx
 
-    ! kgao: needs to check if am5 needs to do the same as below 
+    ! kgao: for shield+mom6 coupling; used by shield pbl schemes (am5 with tke-edmf should do the same) 
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%shflx,     'ATM', ex_flux_t     , xmap_sfc, complete=.false.) !kgao
     call fms_xgrid_get_from_xgrid (Land_Ice_Atmos_Boundary%lhflx,     'ATM', ex_flux_tr(:,isphum), xmap_sfc, complete=.false.) !kgao
 
