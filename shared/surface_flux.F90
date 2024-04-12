@@ -117,6 +117,7 @@ module surface_flux_mod
 
 use FMS
 use FMSconstants, only: cp_air, hlv, stefan, rdgas, rvgas, grav, vonkarm
+use ocean_rough_mod, only: cal_z0_hwrf17, cal_zt_hwrf17 ! kgao
 
 implicit none
 private
@@ -178,7 +179,8 @@ real :: bulk_zt = 10.                      !< Reference height for atm temperatu
 real :: bulk_zq = 10.                      !< Reference height for atm humidity (meters)
 logical :: raoult_sat_vap        = .false. !< Reduce saturation vapor pressure to account for seawater
 logical :: do_simple             = .false.
-
+logical :: iter_mo               = .false. !< A flag controls if iterates monin obukhov with z0 and zt updated; by kgao  
+character(len=32) :: rough_scheme = 'fixed'!< roughness length scheme to be read from ocean_rough_nml; not used if iter_mo is false
 
 namelist /surface_flux_nml/ no_neg_q,                   &
                             use_virtual_temp,           &
@@ -194,7 +196,8 @@ namelist /surface_flux_nml/ no_neg_q,                   &
                             bulk_zt,                    &
                             bulk_zq,                    &
                             raoult_sat_vap,             &
-                            do_simple
+                            do_simple,                  &
+                            iter_mo !kgao
 
 
 
@@ -369,6 +372,19 @@ subroutine surface_flux_1d (                                           &
   call fms_monin_obukhov_mo_drag (thv_atm, thv_surf, z_atm,                  &
        rough_mom, rough_heat, rough_moist, w_atm,          &
        cd_m, cd_t, cd_q, u_star, b_star, avail             )
+  
+  ! kgao 04/09/2024
+  ! - iterate monin-obukhov with roughness length updated
+  ! - the following fields, cd_m, cd_g, cd_q, u_star, b_star, which are the outputs 
+  !   from the above monin-obukhov call will be overridden
+  ! - only do this when iter_mo is set to true and the rough_scheme is hwrf17  
+  if (iter_mo .and. trim(rough_scheme) == 'hwrf17') then
+     call iterate_monin_obukhov_with_roughness_length (   &
+          z_atm, u_atm, v_atm, w_atm, thv_atm, q_atm,     &
+          u_surf, v_surf, thv_surf, q_surf0,              &
+          rough_mom, rough_heat, rough_moist,             &
+          cd_m, cd_t, cd_q, u_star, b_star, avail, rough_scheme)
+  endif
 
   ! override with ocean fluxes from NCAR calculation
   if ((ncar_ocean_flux .or. ncar_ocean_flux_orig) .and. (.not.ncar_ocean_flux_multilevel)) then
@@ -684,6 +700,11 @@ subroutine surface_flux_init
   read (fms_mpp_input_nml_file, surface_flux_nml, iostat=io)
   ierr = check_nml_error(io,'surface_flux_nml')
 
+  ! kgao: read rough_scheme from ocean_rough namelist
+  if (iter_mo) then
+    call read_ocean_rough_nml(rough_scheme) 
+  endif
+
   ! write version number
   call fms_write_version_number(version, tagname)
 
@@ -697,8 +718,6 @@ subroutine surface_flux_init
   module_is_initialized = .true.
 
 end subroutine surface_flux_init
-
-
 
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~!
 !> \brief Over-ocean fluxes following Large and Yeager (used in NCAR models)           !
@@ -978,5 +997,97 @@ real   , intent(out)  , dimension(:) :: bstar        ! turbulent scale for buoya
   end do
 
 end subroutine ncar_ocean_fluxes_multilevel
+
+! kgao
+subroutine iterate_monin_obukhov_with_roughness_length (   &
+           z_atm, u_atm, v_atm, w_atm, thv_atm, q_atm,     &
+           u_surf, v_surf, thv_surf, q_surf0,              &
+           rough_mom, rough_heat, rough_moist,             &
+           cd_m, cd_t, cd_q, u_star, b_star, avail, rough_scheme)
+
+  logical, intent(in), dimension(:) :: avail
+  real   , intent(in), dimension(:) ::                     &
+           z_atm, u_atm, v_atm, w_atm, thv_atm, q_atm,     &
+           u_surf, v_surf, thv_surf, q_surf0,              &
+           rough_mom, rough_heat, rough_moist
+
+  character(len=32), intent(in) :: rough_scheme
+
+  real   , intent(inout), dimension(:) ::                  &
+           cd_m, cd_t, cd_q, u_star, b_star
+
+  ! local var
+  real   , dimension(size(z_atm(:))) ::                    &
+           flux_q, q_star,                                 &
+           ref_u, ref_v, u10, del_m, del_h, del_q,         &
+           rough_mom1, rough_heat1, rough_moist1
+  integer i
+
+  ! get q_star (not important but required by mo_profile)
+  where (avail)
+    flux_q = cd_q * w_atm * (q_surf0 - q_atm)
+    q_star = flux_q / u_star
+  endwhere
+
+  ! get del_m for diagnosing u10
+  ! this step can be skipped if using neutral wind to calculate z0/zt
+  call fms_monin_obukhov_mo_profile ( 10., 2., z_atm,      &
+       rough_mom, rough_heat, rough_moist,                 &
+       u_star, b_star, q_star,                             &
+       del_m, del_h, del_q, avail )
+
+  ! get 10m wind and then use it to get z0/zt
+  do i = 1, size(avail)
+     u10(i) = 0.
+     if(avail(i)) then
+        ref_u(i) = u_surf(i) + (u_atm(i)-u_surf(i)) * del_m(i)
+        ref_v(i) = v_surf(i) + (v_atm(i)-v_surf(i)) * del_m(i)
+        u10(i) = sqrt(ref_u(i)**2 + ref_v(i)**2)
+
+        ! kgao - can expand below for other z0/zt options
+        !if (rough_scheme == 'hwrf17') then
+           call cal_z0_hwrf17(u10(i), rough_mom1(i))
+           call cal_zt_hwrf17(u10(i), rough_heat1(i))
+           rough_moist1(i) = rough_heat1(i)
+        !endif
+     endif
+  enddo
+
+  ! call monin-obukhov similarity theory again with updated z0/zt
+  call fms_monin_obukhov_mo_drag (thv_atm, thv_surf, z_atm, &
+       rough_mom1, rough_heat1, rough_moist1, w_atm,        &
+       cd_m, cd_t, cd_q, u_star, b_star, avail )
+
+end subroutine iterate_monin_obukhov_with_roughness_length
+
+! kgao
+subroutine read_ocean_rough_nml(rough_scheme)
+  real    :: roughness_init = 0.00044
+  real    :: roughness_min  = 1.e-6
+  real    :: charnock       = 0.032
+  real    :: roughness_mom   = 5.8e-5
+  real    :: roughness_heat  = 5.8e-5
+  real    :: roughness_moist = 5.8e-5
+  real            :: zcoh1 = 0.0
+  real            :: zcoq1 = 0.0
+  real            :: v10m  = 32.5
+  real            :: v10n  = 17.5
+  logical :: do_highwind     = .false.
+  logical :: do_cap40        = .false.
+  character(len=32), intent(inout) :: rough_scheme
+  integer :: ierr, io      
+
+  namelist /ocean_rough_nml/roughness_init, roughness_heat, &
+                           roughness_mom,  roughness_moist, &
+                           roughness_min,                   &
+                           charnock,                        &
+                           rough_scheme, do_highwind,       &
+                           do_cap40, zcoh1, zcoq1,          &
+                           v10m, v10n
+
+  read (fms_mpp_input_nml_file, nml=ocean_rough_nml, iostat=io)
+  ierr = check_nml_error(io, 'ocean_rough_nml')
+
+end subroutine read_ocean_rough_nml
 
 end module surface_flux_mod
