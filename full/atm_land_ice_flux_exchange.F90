@@ -107,8 +107,8 @@ use FMSconstants, only: rdgas, rvgas, cp_air, stefan, WTMAIR, HLV, HLF, Radius, 
              id_rough_moist, id_rough_heat, id_rough_mom,    &
              id_land_mask,   id_ice_mask,     &
              id_u_star, id_b_star, id_q_star, id_u_flux, id_v_flux,   &
-             id_t_surf, id_t_ocean, id_t_flux, id_r_flux, id_q_flux, id_slp,      &
-             id_t_atm,  id_u_atm,  id_v_atm,  id_wind,                &
+             id_t_surf, id_t_ocean,id_t_flux, id_r_flux, id_q_flux, id_slp,      &
+             id_s_flux, id_lprec,  id_t_atm,  id_u_atm,  id_v_atm,  id_wind,                &
              id_t_ref,  id_rh_ref, id_u_ref,  id_v_ref, id_wind_ref,  &
              id_del_h,  id_del_m,  id_del_q,  id_rough_scale,         &
              id_t_ca,   id_q_surf, id_q_atm, id_z_atm, id_p_atm, id_gust, &
@@ -1948,6 +1948,8 @@ contains
     type(atmos_ice_boundary_type),     intent(inout):: Ice_boundary !< A derived data type to specify properties and fluxes passed
                                                                     !! from atmosphere to ice
 
+    real, dimension(size(Atmos_boundary%t,1),size(Atmos_boundary%t,2)) :: diag_atm
+
     real, dimension(n_xgrid_sfc) :: ex_flux_sw, ex_flux_lwd, &
          ex_flux_sw_dir,  &
          ex_flux_sw_dif,  &
@@ -2162,6 +2164,18 @@ contains
           enddo
        enddo
     end if
+
+    ! KGao: add sw flux and precip diagnosis 
+
+    if ( id_s_flux > 0 ) then
+       call fms_xgrid_get_from_xgrid (diag_atm, 'ATM', ex_flux_sw, xmap_sfc)
+       used = fms_diag_send_data ( id_s_flux, diag_atm, Time )
+    endif
+
+    if ( id_lprec > 0 ) then
+       call fms_xgrid_get_from_xgrid (diag_atm, 'ATM', ex_lprec, xmap_sfc)
+       used = fms_diag_send_data ( id_lprec, diag_atm, Time )
+    endif
 
 !!$  ex_flux_sw_dir = ex_flux_sw_dir - ex_flux_sw_vis_dir            ! temporarily nir/dir
 !!$  ex_flux_sw_dir = ex_flux_sw_dir * ex_albedo_nir_dir_fix         ! fix nir/dir
@@ -3521,6 +3535,14 @@ contains
     id_r_flux     = &
          fms_diag_register_diag_field ( mod_name, 'lwflx',      atmos_axes, Time, &
          'net (down-up) longwave flux',   'w/m2'    )
+
+    id_s_flux     = &
+         fms_diag_register_diag_field ( mod_name, 'swflx',      atmos_axes, Time, &
+         'net (down-up) shorwave flux',   'w/m2'    )
+
+    id_lprec     = &
+         fms_diag_register_diag_field ( mod_name, 'lprec',      atmos_axes, Time, &
+         'sfc precip rate',   'kg/m2/s'    )
 
     id_t_atm      = &
          fms_diag_register_diag_field ( mod_name, 't_atm',      atmos_axes, Time, &
